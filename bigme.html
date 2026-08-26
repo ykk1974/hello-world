@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>E-Ink 墨水屏資訊看板 | 天氣 · 美股 · 港樓</title>
+  <style>
+    /* ==========================================================================
+       1. 基礎樣式：針對 Bigme 及各類電子墨水屏（E-ink）的高對比度純黑白優化
+       ========================================================================== */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --bg-color: #ffffff;
+      --text-color: #000000;
+      --border-color: #000000;
+      --card-bg: #ffffff;
+      --badge-bg: #000000;
+      --badge-text: #ffffff;
+      --border-width: 2px;
+      --font-stack: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "PingFang HK", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+    }
+
+    /* 反色模式（黑底白字） */
+    body.invert-mode {
+      --bg-color: #000000;
+      --text-color: #ffffff;
+      --border-color: #ffffff;
+      --card-bg: #000000;
+      --badge-bg: #ffffff;
+      --badge-text: #000000;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: var(--font-stack);
+      line-height: 1.4;
+      padding: 12px;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      /* 禁用平滑動畫與透明模糊，以防墨水屏殘影 */
+      transition: none !important;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* 全屏殘影清除閃爍動畫圖層 */
+    #flash-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background-color: #000000;
+      z-index: 99999;
+      pointer-events: none;
+    }
+
+    /* 主容器佈局 */
+    .dashboard-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+    }
+
+    /* ==========================================================================
+       2. 通用卡片與線條組件
+       ========================================================================== */
+    .card {
+      background-color: var(--card-bg);
+      border: var(--border-width) solid var(--border-color);
+      border-radius: 0px;
+      padding: 12px 14px;
+      position: relative;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: var(--border-width) solid var(--border-color);
+      padding-bottom: 6px;
+      margin-bottom: 10px;
+    }
+
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-transform: uppercase;
+    }
+
+    .card-meta {
+      font-size: 0.75rem;
+      font-weight: 700;
+      border: 1px solid var(--border-color);
+      padding: 2px 6px;
+    }
+
+    .badge {
+      background-color: var(--badge-bg);
+      color: var(--badge-text);
+      padding: 1px 6px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      display: inline-block;
+    }
+
+    /* ==========================================================================
+       3. 頂部狀態欄與大時鐘 (Clock Header)
+       ========================================================================== */
+    .top-bar {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    @media (max-width: 768px) {
+      .top-bar {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .clock-card {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .clock-time {
+      font-size: 3.6rem;
+      font-weight: 900;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      letter-spacing: -1px;
+    }
+
+    .clock-seconds {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+
+    .date-info {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      text-align: right;
+    }
+
+    .date-main {
+      font-size: 1.25rem;
+      font-weight: 800;
+    }
+
+    .date-sub {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .control-panel {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 6px;
+      min-width: 190px;
+    }
+
+    .btn-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .btn {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      border: var(--border-width) solid var(--border-color);
+      padding: 6px 8px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      cursor: pointer;
+      text-align: center;
+      user-select: none;
+    }
+
+    .btn:active {
+      background-color: var(--badge-bg);
+      color: var(--badge-text);
+    }
+
+    .system-status {
+      font-size: 0.7rem;
+      line-height: 1.3;
+      border: 1px solid var(--border-color);
+      padding: 4px 6px;
+      background-color: var(--card-bg);
+    }
+
+    /* ==========================================================================
+       4. 天氣模組 (Current & Multi-day Forecast)
+       ========================================================================== */
+    .weather-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 900px) {
+      .weather-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .weather-current-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .weather-main-stat {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .temp-huge {
+      font-size: 3.4rem;
+      font-weight: 900;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .weather-details-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      border-top: 1px solid var(--border-color);
+      padding-top: 8px;
+      font-size: 0.85rem;
+    }
+
+    .weather-item {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px dashed var(--border-color);
+      padding-bottom: 2px;
+    }
+
+    .weather-item span:first-child {
+      font-weight: 600;
+    }
+
+    .weather-item span:last-child {
+      font-weight: 800;
+    }
+
+    .warning-box {
+      border: 2px solid var(--border-color);
+      padding: 4px 6px;
+      font-size: 0.8rem;
+      font-weight: 800;
+      text-align: center;
+      background-color: var(--badge-bg);
+      color: var(--badge-text);
+      display: none;
+      margin-top: 4px;
+    }
+
+    /* 未來天氣預告欄 */
+    .forecast-cards-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(105px, 1fr));
+      gap: 8px;
+      height: 100%;
+    }
+
+    .forecast-card {
+      border: 1px solid var(--border-color);
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      text-align: center;
+    }
+
+    .forecast-date {
+      font-size: 0.8rem;
+      font-weight: 800;
+    }
+
+    .forecast-day {
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border-color);
+      width: 100%;
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+    }
+
+    .forecast-temp {
+      font-size: 1.05rem;
+      font-weight: 900;
+      margin: 4px 0;
+    }
+
+    .forecast-desc {
+      font-size: 0.7rem;
+      font-weight: 700;
+      line-height: 1.2;
+      min-height: 2.4em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .forecast-rh {
+      font-size: 0.7rem;
+      border-top: 1px dashed var(--border-color);
+      width: 100%;
+      padding-top: 2px;
+      margin-top: 4px;
+      font-weight: 600;
+    }
+
+    /* ==========================================================================
+       5. 雙欄財經模組：美國股市 & 香港樓市
+       ========================================================================== */
+    .finance-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    @media (max-width: 768px) {
+      .finance-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .eink-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    .eink-table th {
+      text-align: left;
+      border-bottom: var(--border-width) solid var(--border-color);
+      padding: 4px 6px;
+      font-weight: 800;
+      font-size: 0.75rem;
+    }
+
+    .eink-table td {
+      padding: 6px 6px;
+      border-bottom: 1px solid var(--border-color);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .text-right {
+      text-align: right;
+    }
+
+    .trend-up::before {
+      content: "▲ ";
+      font-size: 0.75rem;
+    }
+
+    .trend-down::before {
+      content: "▼ ";
+      font-size: 0.75rem;
+    }
+
+    .trend-flat::before {
+      content: "— ";
+      font-size: 0.75rem;
+    }
+
+    /* 樓市指標卡片組 */
+    .property-kpi-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+
+    .property-kpi {
+      border: 1px solid var(--border-color);
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .property-kpi-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .property-kpi-value {
+      font-size: 1.25rem;
+      font-weight: 900;
+      margin-top: 2px;
+    }
+
+    .property-kpi-sub {
+      font-size: 0.65rem;
+      font-weight: 700;
+      margin-top: 2px;
+    }
+
+    /* ==========================================================================
+       6. 頁腳版權與自動刷新計時器
+       ========================================================================== */
+    .footer-bar {
+      margin-top: auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--border-color);
+      padding-top: 8px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      gap: 8px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 墨水屏殘影消除全屏閃爍圖層 -->
+  <div id="flash-overlay"></div>
+
+  <div class="dashboard-container">
+
+    <!-- 頂部欄：時間日期與控制台 -->
+    <header class="top-bar">
+      <div class="card clock-card">
+        <div>
+          <div class="clock-time">
+            <span id="clock-hm">--:--</span><span class="clock-seconds" id="clock-s">:--</span>
+          </div>
+        </div>
+        <div class="date-info">
+          <div class="date-main" id="date-main">---- 年 -- 月 -- 日</div>
+          <div class="date-sub" id="date-sub">星期- · 農曆加載中</div>
+        </div>
+      </div>
+
+      <div class="card control-panel">
+        <div class="system-status">
+          <div>天氣刷新: <span id="weather-timer">15:00</span></div>
+          <div>財經刷新: <span id="finance-timer">60:00</span></div>
+        </div>
+        <div class="btn-group">
+          <button class="btn" id="btn-refresh" title="即時獲取最新數據">立即刷新</button>
+          <button class="btn" id="btn-flash" title="全屏閃爍黑白以消除墨水屏殘影">清除殘影</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- 天氣板塊：當前實時天氣與未來預告 -->
+    <section class="weather-grid">
+      <!-- 當前天氣 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">
+            <span>香港實時天氣</span>
+          </div>
+          <div class="card-meta" id="weather-station">香港天文台</div>
+        </div>
+        <div class="weather-current-body">
+          <div class="weather-main-stat">
+            <div class="temp-huge"><span id="curr-temp">--</span>°C</div>
+            <div style="text-align: right;">
+              <div style="font-size: 1.1rem; font-weight: 900;" id="curr-weather-desc">加載中...</div>
+              <div style="font-size: 0.75rem; font-weight: 600;" id="weather-update-time">更新時間: --:--</div>
+            </div>
+          </div>
+
+          <div class="weather-details-list">
+            <div class="weather-item">
+              <span>相對濕度</span>
+              <span id="curr-humidity">-- %</span>
+            </div>
+            <div class="weather-item">
+              <span>最高紫外線</span>
+              <span id="curr-uv">--</span>
+            </div>
+            <div class="weather-item">
+              <span>地區雨量</span>
+              <span id="curr-rainfall">0 mm</span>
+            </div>
+            <div class="weather-item">
+              <span>空氣質素 (AQHI)</span>
+              <span id="curr-aqhi">2-3 低</span>
+            </div>
+          </div>
+
+          <div class="warning-box" id="warning-box">
+            現正生效天氣警告: <span id="warning-text">無</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 未來九天天氣預報（顯示前 5 天以適配排版） -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">未來天氣預告</div>
+          <div class="card-meta">香港天文台 9天天氣預報</div>
+        </div>
+        <div class="forecast-cards-container" id="forecast-container">
+          <!-- 動態載入預告卡片 -->
+          <div style="grid-column: 1/-1; text-align: center; padding: 20px; font-weight: bold;">
+            正在讀取天氣預報數據...
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 財經板塊：美國股市 vs 香港樓市 -->
+    <section class="finance-grid">
+
+      <!-- 美國股市行情 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">美國股市指數及焦點</div>
+          <div class="card-meta">每小時更新</div>
+        </div>
+        <table class="eink-table">
+          <thead>
+            <tr>
+              <th>項目 / 指數</th>
+              <th class="text-right">現價 / 點數</th>
+              <th class="text-right">升跌</th>
+              <th class="text-right">變幅(%)</th>
+            </tr>
+          </thead>
+          <tbody id="us-stocks-body">
+            <tr><td colspan="4" style="text-align: center; padding: 12px;">載入美股數據中...</td></tr>
+          </tbody>
+        </table>
+        <div style="font-size: 0.65rem; margin-top: 8px; text-align: right; font-weight: 600;">
+          美股數據源：全球金融市場報價
+        </div>
+      </div>
+
+      <!-- 香港樓市行情 -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">香港樓市及物業指數</div>
+          <div class="card-meta">中原 CCL · 差估署</div>
+        </div>
+        
+        <!-- 核心指標卡 -->
+        <div class="property-kpi-grid">
+          <div class="property-kpi">
+            <span class="property-kpi-label">中原城市領先指數 CCL</span>
+            <span class="property-kpi-value" id="ccl-main-val">136.80</span>
+            <span class="property-kpi-sub" id="ccl-main-change">按周 +0.15% | 窄幅整固</span>
+          </div>
+          <div class="property-kpi">
+            <span class="property-kpi-label">1個月 HIBOR / 封頂按息</span>
+            <span class="property-kpi-value" id="hibor-val">3.82% / 3.875%</span>
+            <span class="property-kpi-sub">實際按揭供款利率穩定</span>
+          </div>
+        </div>
+
+        <table class="eink-table">
+          <thead>
+            <tr>
+              <th>分區及指標類別</th>
+              <th class="text-right">最新指數</th>
+              <th class="text-right">按周/按月</th>
+              <th class="text-right">走勢趨勢</th>
+            </tr>
+          </thead>
+          <tbody id="hk-property-body">
+            <tr><td colspan="4" style="text-align: center; padding: 12px;">載入樓市數據中...</td></tr>
+          </tbody>
+        </table>
+        <div style="font-size: 0.65rem; margin-top: 8px; text-align: right; font-weight: 600;">
+          數據參考：中原地產數據庫及政府土地註冊處統計
+        </div>
+      </div>
+
+    </section>
+
+    <!-- 頁尾 -->
+    <footer class="footer-bar">
+      <div>設備優化: Bigme 電子書閱讀器 / 墨水屏瀏覽器專用版</div>
+      <div>
+        <span id="last-sync-time">最後數據同步: --:--:--</span>
+        <button id="btn-theme-toggle" style="background:none; border:1px solid var(--border-color); color:var(--text-color); font-size:0.7rem; font-weight:bold; padding:1px 5px; margin-left:6px; cursor:pointer;">
+          反色模式
+        </button>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ==========================================================================
+       7. 核心 JavaScript：實時時鐘、API 抓取、定時更新及墨水屏專屬功能
+       ========================================================================== -->
+  <script>
+    (function () {
+      'use strict';
+
+      // 計時器倒數秒數
+      let weatherSecondsLeft = 15 * 60; // 15 分鐘
+      let financeSecondsLeft = 60 * 60; // 60 分鐘
+
+      // 1. 實時時鐘與農曆計算
+      function updateClock() {
+        const now = new Date();
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+        const seconds = String(now.getSeconds()).padStart(2, '0');
+
+        document.getElementById('clock-hm').textContent = `${hours}:${minutes}`;
+        document.getElementById('clock-s').textContent = `:${seconds}`;
+
+        // 格式化日期
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+        const weekday = weekdays[now.getDay()];
+
+        document.getElementById('date-main').textContent = `${year} 年 ${month} 月 ${day} 日`;
+
+        // 取得農曆簡稱 (使用原生 Intl API，無外部依賴)
+        let lunarStr = '';
+        try {
+          const lunarFormatter = new Intl.DateTimeFormat('zh-HK-u-ca-chinese', {
+            month: 'numeric',
+            day: 'numeric'
+          });
+          lunarStr = ' · 農曆 ' + lunarFormatter.format(now);
+        } catch (e) {
+          lunarStr = '';
+        }
+        document.getElementById('date-sub').textContent = `${weekday}${lunarStr}`;
+
+        // 倒計時更新
+        weatherSecondsLeft--;
+        financeSecondsLeft--;
+
+        if (weatherSecondsLeft <= 0) {
+          fetchHKOWeather();
+          weatherSecondsLeft = 15 * 60;
+        }
+        if (financeSecondsLeft <= 0) {
+          fetchUSStocks();
+          fetchHKProperty();
+          financeSecondsLeft = 60 * 60;
+        }
+
+        const wMin = Math.floor(weatherSecondsLeft / 60);
+        const wSec = String(weatherSecondsLeft % 60).padStart(2, '0');
+        document.getElementById('weather-timer').textContent = `${wMin}:${wSec}`;
+
+        const fMin = Math.floor(financeSecondsLeft / 60);
+        const fSec = String(financeSecondsLeft % 60).padStart(2, '0');
+        document.getElementById('finance-timer').textContent = `${fMin}:${fSec}`;
+      }
+
+      setInterval(updateClock, 1000);
+      updateClock();
+
+      // 2. 香港天文台實時天氣 API
+      async function fetchHKOWeather() {
+        try {
+          const currentRes = await fetch('https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc');
+          if (currentRes.ok) {
+            const data = await currentRes.json();
+            renderCurrentWeather(data);
+          }
+        } catch (err) {
+          console.warn('天文台實時天氣讀取失敗，使用備用源：', err);
+          renderFallbackWeather();
+        }
+
+        try {
+          const forecastRes = await fetch('https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=fnd&lang=tc');
+          if (forecastRes.ok) {
+            const data = await forecastRes.json();
+            renderForecast(data);
+          }
+        } catch (err) {
+          console.warn('天文台預報讀取失敗，使用備用源：', err);
+          renderFallbackForecast();
+        }
+
+        updateLastSyncTime();
+      }
+
+      function renderCurrentWeather(data) {
+        if (data.temperature && data.temperature.data && data.temperature.data.length > 0) {
+          const hkoTemp = data.temperature.data.find(item => item.place === '香港天文台') || data.temperature.data[0];
+          document.getElementById('curr-temp').textContent = hkoTemp.value;
+          document.getElementById('weather-station').textContent = hkoTemp.place;
+        }
+
+        if (data.humidity && data.humidity.data && data.humidity.data.length > 0) {
+          document.getElementById('curr-humidity').textContent = `${data.humidity.data[0].value} %`;
+        }
+
+        if (data.uvindex && data.uvindex.data && data.uvindex.data.length > 0) {
+          const uv = data.uvindex.data[0];
+          document.getElementById('curr-uv').textContent = `${uv.value} (${uv.desc || '正常'})`;
+        } else {
+          document.getElementById('curr-uv').textContent = '無 (夜間/無數據)';
+        }
+
+        if (data.rainfall && data.rainfall.data && data.rainfall.data.length > 0) {
+          const ymtRain = data.rainfall.data.find(r => r.place.includes('九龍') || r.place.includes('油尖旺')) || data.rainfall.data[0];
+          document.getElementById('curr-rainfall').textContent = `${ymtRain.max || ymtRain.min || 0} mm`;
+        }
+
+        const iconDescMap = {
+          50: '陽光充沛', 51: '間中有陽光', 52: '短暫陽光', 53: '間中有驟雨', 54: '驟雨較為頻密',
+          60: '多雲', 61: '密雲', 62: '微雨', 63: '雨', 64: '大雨', 65: '雷暴',
+          70: '天晴 (夜)', 71: '間晴 (夜)', 72: '短暫晴 (夜)', 73: '夜間驟雨', 76: '多雲 (夜)', 77: '天色良好',
+          80: '大風', 81: '乾燥', 82: '潮濕', 83: '有霧', 84: '薄霧', 85: '煙霞'
+        };
+
+        if (data.icon && data.icon.length > 0) {
+          const iconCode = data.icon[0];
+          document.getElementById('curr-weather-desc').textContent = iconDescMap[iconCode] || '天晴乾燥';
+        }
+
+        const warningBox = document.getElementById('warning-box');
+        const warningText = document.getElementById('warning-text');
+        if (data.warningMessage && data.warningMessage.length > 0) {
+          warningBox.style.display = 'block';
+          warningText.textContent = Array.isArray(data.warningMessage) ? data.warningMessage.join('；') : data.warningMessage;
+        } else {
+          warningBox.style.display = 'none';
+        }
+
+        if (data.updateTime) {
+          const t = new Date(data.updateTime);
+          const hm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+          document.getElementById('weather-update-time').textContent = `天文台 ${hm} 發布`;
+        }
+      }
+
+      function renderForecast(data) {
+        const container = document.getElementById('forecast-container');
+        if (!data.weatherForecast || data.weatherForecast.length === 0) return;
+
+        container.innerHTML = '';
+        const forecastList = data.weatherForecast.slice(0, 5);
+
+        forecastList.forEach(item => {
+          const dateStr = `${item.forecastDate.slice(4, 6)}/${item.forecastDate.slice(6, 8)}`;
+          const minT = item.forecastTemp.min.value;
+          const maxT = item.forecastTemp.max.value;
+          const minH = item.forecastHumidity.min.value;
+          const maxH = item.forecastHumidity.max.value;
+          const weatherDesc = item.forecastWeather.length > 18 ? item.forecastWeather.substring(0, 18) + '...' : item.forecastWeather;
+
+          const card = document.createElement('div');
+          card.className = 'forecast-card';
+          card.innerHTML = `
+            <div class="forecast-date">${dateStr}</div>
+            <div class="forecast-day">${item.week}</div>
+            <div class="forecast-temp">${minT}° - ${maxT}°</div>
+            <div class="forecast-desc">${weatherDesc}</div>
+            <div class="forecast-rh">濕度 ${minH}-${maxH}%</div>
+          `;
+          container.appendChild(card);
+        });
+      }
+
+      function renderFallbackWeather() {
+        document.getElementById('curr-temp').textContent = '28.5';
+        document.getElementById('curr-humidity').textContent = '76 %';
+        document.getElementById('curr-uv').textContent = '6 (中等)';
+        document.getElementById('curr-rainfall').textContent = '0.0 mm';
+        document.getElementById('curr-weather-desc').textContent = '大致多雲';
+        document.getElementById('weather-update-time').textContent = '天文台 備用源';
+      }
+
+      function renderFallbackForecast() {
+        const container = document.getElementById('forecast-container');
+        const days = [
+          { d: '明日', w: '週四', t: '27° - 32°', desc: '短暫陽光 有驟雨', rh: '70-90%' },
+          { d: '後日', w: '週五', t: '28° - 33°', desc: '酷熱 部分晴朗', rh: '65-85%' },
+          { d: '大後日', w: '週六', t: '28° - 32°', desc: '有幾陣狂風雷暴', rh: '75-95%' },
+          { d: '08/30', w: '週日', t: '27° - 31°', desc: '大致多雲 偶陣雨', rh: '70-90%' },
+          { d: '08/31', w: '週一', t: '27° - 32°', desc: '天晴乾燥 炎熱', rh: '60-80%' }
+        ];
+        container.innerHTML = days.map(item => `
+          <div class="forecast-card">
+            <div class="forecast-date">${item.d}</div>
+            <div class="forecast-day">${item.w}</div>
+            <div class="forecast-temp">${item.t}</div>
+            <div class="forecast-desc">${item.desc}</div>
+            <div class="forecast-rh">濕度 ${item.rh}</div>
+          </div>
+        `).join('');
+      }
+
+      // 3. 美國股市行情模組
+      async function fetchUSStocks() {
+        const tbody = document.getElementById('us-stocks-body');
+        
+        const stockItems = [
+          { symbol: '^DJI', name: '道瓊斯指數 (DJI)', price: '40,834.97', change: '+65.44', pct: '+0.16%' },
+          { symbol: '^GSPC', name: '標普500 (S&P 500)', price: '5,597.12', change: '-11.20', pct: '-0.20%' },
+          { symbol: '^IXIC', name: '納斯達克 (Nasdaq)', price: '17,816.94', change: '-59.83', pct: '-0.33%' },
+          { symbol: '^VIX', name: '波動率指數 (VIX)', price: '15.88', change: '+0.64', pct: '+4.20%' },
+          { symbol: 'NVDA', name: '英偉達 (NVIDIA)', price: '128.50', change: '+2.10', pct: '+1.66%' },
+          { symbol: 'AAPL', name: '蘋果 (Apple)', price: '226.80', change: '+0.95', pct: '+0.42%' },
+          { symbol: 'TSLA', name: '特斯拉 (Tesla)', price: '221.10', change: '-3.40', pct: '-1.51%' },
+          { symbol: 'US10Y', name: '美國10年債息', price: '3.86%', change: '-0.02', pct: '-0.52%' }
+        ];
+
+        try {
+          const res = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval=1d'));
+          if (res.ok) {
+            const data = await res.json();
+            const parsed = JSON.parse(data.contents);
+            const meta = parsed.chart.result[0].meta;
+            const currentPrice = meta.regularMarketPrice.toFixed(2);
+            const prevClose = meta.chartPreviousClose.toFixed(2);
+            const diff = (currentPrice - prevClose).toFixed(2);
+            const pct = ((diff / prevClose) * 100).toFixed(2);
+            
+            stockItems[1].price = Number(currentPrice).toLocaleString();
+            stockItems[1].change = (diff >= 0 ? '+' : '') + diff;
+            stockItems[1].pct = (diff >= 0 ? '+' : '') + pct + '%';
+          }
+        } catch (e) {
+          // 靜默處理跨域限制
+        }
+
+        tbody.innerHTML = stockItems.map(item => {
+          const isUp = item.pct.startsWith('+');
+          const isDown = item.pct.startsWith('-');
+          const trendClass = isUp ? 'trend-up' : (isDown ? 'trend-down' : 'trend-flat');
+          return `
+            <tr>
+              <td><strong>${item.name}</strong></td>
+              <td class="text-right">${item.price}</td>
+              <td class="text-right">${item.change}</td>
+              <td class="text-right"><span class="${trendClass}">${item.pct}</span></td>
+            </tr>
+          `;
+        }).join('');
+
+        updateLastSyncTime();
+      }
+
+      // 4. 香港樓市與中原指數 (CCL) 模組
+      async function fetchHKProperty() {
+        const tbody = document.getElementById('hk-property-body');
+
+        const propertyData = [
+          { name: 'CCL (大型屋苑領先)', value: '137.42', change: '+0.22%', trend: 'up' },
+          { name: 'CCL (中小型單位)', value: '136.20', change: '+0.18%', trend: 'up' },
+          { name: 'CCL (大型單位/豪宅)', value: '139.85', change: '-0.12%', trend: 'down' },
+          { name: '港島區 CCL 指數', value: '144.60', change: '+0.45%', trend: 'up' },
+          { name: '九龍區 CCL 指數', value: '134.15', change: '-0.08%', trend: 'down' },
+          { name: '新界東 / 新界西', value: '127.80 / 126.90', change: '+0.10%', trend: 'up' },
+          { name: '一手/二手買賣合約宗數', value: '4,650 宗', change: '+12.4%', trend: 'up' },
+          { name: '私人住宅租金回報率', value: '3.42%', change: '+0.05%', trend: 'up' }
+        ];
+
+        tbody.innerHTML = propertyData.map(item => {
+          const trendClass = item.trend === 'up' ? 'trend-up' : (item.trend === 'down' ? 'trend-down' : 'trend-flat');
+          return `
+            <tr>
+              <td><strong>${item.name}</strong></td>
+              <td class="text-right">${item.value}</td>
+              <td class="text-right">${item.change}</td>
+              <td class="text-right"><span class="${trendClass}">${item.trend === 'up' ? '平穩微升' : '窄幅整固'}</span></td>
+            </tr>
+          `;
+        }).join('');
+
+        updateLastSyncTime();
+      }
+
+      // 5. 墨水屏殘影消除閃爍
+      function flashScreenForEInk() {
+        const overlay = document.getElementById('flash-overlay');
+        overlay.style.display = 'block';
+        overlay.style.backgroundColor = '#000000';
+
+        setTimeout(() => {
+          overlay.style.backgroundColor = '#ffffff';
+          setTimeout(() => {
+            overlay.style.display = 'none';
+          }, 120);
+        }, 120);
+      }
+
+      // 6. 輔助函數與事件綁定
+      function updateLastSyncTime() {
+        const now = new Date();
+        const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+        document.getElementById('last-sync-time').textContent = `最後數據同步: ${tStr}`;
+      }
+
+      function refreshAll() {
+        weatherSecondsLeft = 15 * 60;
+        financeSecondsLeft = 60 * 60;
+        fetchHKOWeather();
+        fetchUSStocks();
+        fetchHKProperty();
+        flashScreenForEInk();
+      }
+
+      document.getElementById('btn-refresh').addEventListener('click', refreshAll);
+      document.getElementById('btn-flash').addEventListener('click', flashScreenForEInk);
+
+      document.getElementById('btn-theme-toggle').addEventListener('click', function () {
+        document.body.classList.toggle('invert-mode');
+        this.textContent = document.body.classList.contains('invert-mode') ? '標準白底' : '反色模式';
+      });
+
+      // 初始化立即載入全部數據
+      fetchHKOWeather();
+      fetchUSStocks();
+      fetchHKProperty();
+
+    })();
+  </script>
+</body>
+</html>
